@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filtro de O.S - Inadimplência</title>
+
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body>
+
+    <div id="custom-tooltip"></div>
+    <div id="toast-container"></div>
+
+    <div class="tutorial-overlay" id="tutorial-overlay"></div>
+    <div class="tutorial-popover" id="tutorial-popover">
+        <h4 id="tutorial-title"></h4>
+        <p id="tutorial-text"></p>
+        <div class="tutorial-actions">
+            <button class="btn-tutorial-next" id="btn-tutorial-next" onclick="proximoPassoTutorial()">Avançar</button>
+            <button class="btn-tutorial-close" onclick="encerrarTutorialInterativo()">Sair</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; align-items: center">
+                    <img id="header-img" width="50px" height="50px" style="margin-right: 10px; object-fit: cover;"
+                        src="https://media.discordapp.net/attachments/1197495958582329354/1507106589633544412/14-hello_-_Copia.png?ex=6a115aa3&is=6a100923&hm=e40ffdedeec6aabea1ca983c5534ef3a5158dee9d976652071591b462bef0993&=&format=webp&quality=lossless&width=556&height=572"
+                        alt="Robô da VPU" />
+                    <h1 id="header-title">Oi! Seja bem-vindo(a)</h1>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div class="upload-container" id="tour-upload">
+                    <div class="upload-section" id="drop-zone" onclick="document.getElementById('excel-file').click()">
+                        <p id="file-title">Clique para abrir o arquivo ou arraste aqui.</p>
+                        <p id="file-name"></p>
+
+                        <input type="file" id="excel-file" accept=".xlsx, .xls, .csv" style="display: none;" />
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                        <button data-tooltip="Tutorial do projeto" class="btn-tutorial" id="btn-tutorial-guia" onclick="iniciarTutorialInterativo()"
+                            style="display: none; margin-right: 30px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"
+                                style="margin-bottom:-2px;">
+                                <path
+                                    d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 16h-2v-2h2v2zm1.07-7.75l-.9.92C12.45 11.9 12 12.5 12 14h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.25z" />
+                            </svg>
+                            Guia do Painel
+                        </button>
+                        <button data-tooltip="Excluir todos os dados" class="btn-reset-global" id="btn-reset"
+                            onclick="resetarDashboardGlobal()">Resetar</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="skeleton-wrapper" id="skeleton-screen" style="display: none;">
+            <div class="skeleton-card">
+                <div class="skeleton-line" style="width: 50%; height: 20px;"></div>
+                <div class="skeleton-line" style="width: 100%; height: 180px; margin-top: 24px;"></div>
+            </div>
+            <div class="skeleton-card">
+                <div class="skeleton-line" style="width: 40%; height: 20px;"></div>
+                <div class="skeleton-line" style="width: 100%; height: 180px; margin-top: 24px;"></div>
+            </div>
+            <div class="skeleton-card">
+                <div class="skeleton-line" style="width: 60%; height: 20px;"></div>
+                <div class="skeleton-line" style="width: 100%; height: 180px; margin-top: 24px;"></div>
+            </div>
+        </div>
+
+        <div class="results-wrapper" id="results-dashboard">
+            <div class="controls-row" id="tour-controles">
+                <div class="search-wrapper" id="tour-busca">
+                    <input type="text" id="global-search" class="search-input" placeholder="Buscar por nome ou ID..."
+                        oninput="filtrarDadosEmTempoReal()" />
+                </div>
+                <div class="tabs-nav" id="tour-abas">
+                    <button class="tab-btn active" onclick="mudarVisaoAba('todas', this)">Visão Expandida</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('urgente', this)">Sem Sucesso</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('sucesso', this)">Retirado</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('renegociar', this)">Renegociar</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('agendada', this)">O.S Agendada</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('outros', this)">Outros</button>
+                    <button class="tab-btn auditoria-btn" id="tab-auditoria"
+                        onclick="mudarVisaoAba('auditoria', this)">Auditoria de Erros</button>
+                </div>
+            </div>
+
+            <div class="kpi-single-wrapper" id="tour-kpi">
+                <div class="kpi-card-total">
+                    <div class="kpi-total-info">
+                        <span class="kpi-title" id="kpi-total-title">Total de Registros Ativos</span>
+                        <span class="kpi-subtitle" id="kpi-total-subtitle">Consolidado Geral das Tabelas</span>
+                    </div>
+                    <span class="kpi-value" id="kpi-total-global">0</span>
+                </div>
+            </div>
+
+            <div class="dashboard-grid" id="main-dashboard-grid">
+
+                <div class="grid-card" data-col="urgente" id="tour-colunas">
+                    <div class="card-header urgente" draggable="true">
+                        <span>Em aberto</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" id="count-urgente">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('urgente', 'Sem_Sucesso')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Cliente </th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-urgente" data-tooltip="Clique para ver o histórico">
+                                <tr data-search="000000 exemplo" data-raw-id="000000"
+                                    data-raw-name="Exemplo de Cliente Corporativo">
+                                    <td><span class="client-id match-target-id">000000</span></td>
+                                    <td>
+                                        <div class="client-name-wrapper">
+                                            <div class="client-name match-target-name"></div>
+                                            <span class="badge badge-urgente"></span>
+                                        </div>
+                                    </td>
+                                    <td class="col-btn" id="tour-acoes">
+                                        <div class="actions-group">
+                                            <button class="btn-action btn-copy"
+                                                data-tooltip="Copiar nome"><svg viewBox="0 0 24 24">
+                                                    <path
+                                                        d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                                                </svg></button>
+                                            <button class="btn-action btn-check"
+                                                data-tooltip="Marcar como Verificado"><svg viewBox="0 0 24 24">
+                                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                                                </svg></button>
+                                            <button class="btn-action btn-remove" data-tooltip="Remover Registro"><svg
+                                                    viewBox="0 0 24 24">
+                                                    <path
+                                                        d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                                                </svg></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-card" data-col="sucesso">
+                    <div class="card-header sucesso" draggable="true">
+                        <span>Retirado</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" id="count-sucesso">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('sucesso', 'Retirados')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Cliente</th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-sucesso" data-tooltip="Clique para ver o histórico">
+                                <tr>
+                                    <td colspan="3" class="no-data">Nenhum dado.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-card" data-col="renegociar">
+                    <div class="card-header renegociar" draggable="true">
+                        <span>Renegociar</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" id="count-renegociar">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('renegociar', 'Renegociacoes')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Cliente</th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-renegociar" data-tooltip="Clique para ver o histórico">
+                                <tr>
+                                    <td colspan="3" class="no-data">Nenhum dado.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-card" data-col="agendada">
+                    <div class="card-header agendada" draggable="true">
+                        <span>Agendada</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" id="count-agendada">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('agendada', 'OS_Agendadas')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Cliente</th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-agendada" data-tooltip="Clique para ver o histórico">
+                                <tr>
+                                    <td colspan="3" class="no-data">Nenhum dado.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-card" data-col="outros">
+                    <div class="card-header outros" draggable="true">
+                        <span>Outras</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" id="count-outros">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('outros', 'Outros')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Cliente / Diagnóstico</th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-outros" data-tooltip="Clique para ver o histórico">
+                                <tr>
+                                    <td colspan="3" class="no-data">Nenhum dado.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-card" data-col="auditoria">
+                    <div class="card-header auditoria" draggable="true">
+                        <span>Erros</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="count-pill" data-tooltip="Total de itens" style="color:#f43f5e; background: rgba(244,63,94,0.05);"
+                                id="count-auditoria">0</span>
+                            <button class="btn-export" data-tooltip="Baixe o relatório"
+                                onclick="exportarColunaParaExcel('auditoria', 'Auditoria')">Exportar</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th>Erro identificada</th>
+                                    <th class="col-btn">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-auditoria" data-tooltip="Clique para ver o histórico">
+                                <tr>
+                                    <td colspan="3" class="no-data">Nenhum erro encontrado.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="history-modal">
+        <div class="modal-content">
+            <button class="close-modal" onclick="fecharModalHistorico()">&times;</button>
+            <h3 class="modal-title" id="modal-client-name"></h3>
+            <p class="modal-subtitle" id="modal-client-id"></p>
+            <div style="border-top: 1px solid var(--border-light); padding-top: 16px;">
+                <span
+                    style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Histórico:</span>
+                <div class="timeline" id="modal-timeline-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
