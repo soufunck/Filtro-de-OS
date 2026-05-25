@@ -470,7 +470,7 @@ function handleFileProccess(file) {
     document.getElementById('file-title').innerText = 'Dados importados de:';
     document.getElementById('file-name').style.display = 'block';
     document.getElementById('file-name').innerText = `"${file.name}"`;
-    document.getElementById('header-img').setAttribute('src', 'robo_legal.webp')
+    document.getElementById('header-img').setAttribute('src', 'https://raw.githubusercontent.com/soufunck/Filtro-de-OS/refs/heads/main/robo_legal.webp')
     document.getElementById('header-title').innerText = 'Tudo certo!';
 
     btnReset.style.display = 'block';
@@ -1014,7 +1014,7 @@ function resetarDashboardGlobal() {
     document.getElementById('global-search').value = '';
     document.getElementById('file-title').innerText = 'Clique para abrir o arquivo ou arraste aqui.';
     document.getElementById('file-name').style.display = 'none';
-    document.getElementById('header-img').setAttribute('src', 'robo_hello.webp')
+    document.getElementById('header-img').setAttribute('src', 'https://raw.githubusercontent.com/soufunck/Filtro-de-OS/refs/heads/main/robo_hello.webp')
     document.getElementById('header-title').innerText = 'Oi! Seja bem-vindo(a)';
 
     btnReset.style.display = 'none';
