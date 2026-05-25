@@ -15,6 +15,74 @@ let filtroHistoricoAtivo = 'todos';
 
 let itensSelecionadosLote = [];
 
+const TAMANHO_LOTE_RENDERIZACAO = 50;
+
+let limitesExibicaoStatus = {
+    urgente: TAMANHO_LOTE_RENDERIZACAO,
+    sucesso: TAMANHO_LOTE_RENDERIZACAO,
+    renegociar: TAMANHO_LOTE_RENDERIZACAO,
+    agendada: TAMANHO_LOTE_RENDERIZACAO,
+    outros: TAMANHO_LOTE_RENDERIZACAO,
+    auditoria: TAMANHO_LOTE_RENDERIZACAO
+};
+
+let observadoresScrollAtivos = {};
+
+function resetarLimitesExibicaoAoCarregarArquivo() {
+    Object.keys(limitesExibicaoStatus).forEach(status => {
+        limitesExibicaoStatus[status] = TAMANHO_LOTE_RENDERIZACAO;
+    });
+}
+
+function criarElementoGatilhoScroll(status, tagNameContainer) {
+    const ehTabela = tagNameContainer.toLowerCase() === 'tbody';
+    const gatilho = document.createElement(ehTabela ? 'tr' : 'div');
+
+    gatilho.id = `lazy-trigger-${status}`;
+    gatilho.className = 'lazy-load-trigger';
+
+    if (ehTabela) {
+        gatilho.innerHTML = `
+            <td colspan="100%" style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 13px; font-style: italic; background: transparent;">
+                Carregando mais registros de ${status}...
+            </td>
+        `;
+    } else {
+        gatilho.style.cssText = "text-align: center; padding: 12px; color: var(--text-muted); font-size: 13px; font-style: italic;";
+        gatilho.innerText = `Carregando mais...`;
+    }
+
+    return gatilho;
+}
+
+function removerGatilhoScrollAnterior(status) {
+    const gatilhoAntigo = document.getElementById(`lazy-trigger-${status}`);
+    if (gatilhoAntigo) gatilhoAntigo.remove();
+
+    if (observadoresScrollAtivos[status]) {
+        observadoresScrollAtivos[status].disconnect();
+        delete observadoresScrollAtivos[status];
+    }
+}
+
+function ativarIntersectionObserver(elementoGatilho, status, containerTbody, callbackRender) {
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                limitesExibicaoStatus[status] += TAMANHO_LOTE_RENDERIZACAO;
+                callbackRender();
+            }
+        });
+    }, {
+        root: null,
+        rootMargin: '200px',
+        threshold: 0.1
+    });
+
+    observer.observe(elementoGatilho);
+    observadoresScrollAtivos[status] = observer;
+}
+
 // 
 // LOGS
 // 
@@ -42,7 +110,7 @@ function atualizarPainelModificacoesUI() {
 
     const modificacoesAtivas = historicoModificacoes.filter(a => a.tipo !== 'upload' && !a.revertido).length;
     if (contadorUI) {
-        contadorUI.innerText = modificacoesAtivas;
+        contadorUI.innerText = modificacoesAtivas.toLocaleString('pt-BR');
         contadorUI.style.display = modificacoesAtivas > 0 ? 'inline-block' : 'none';
     }
 
@@ -84,7 +152,7 @@ function atualizarPainelModificacoesUI() {
                     <span class="mod-tag mod-${acao.tipo}">${acao.tipo.toUpperCase()}</span>
                 </div>
                 <div class="mod-item-corpo">
-                    <p>Item <b>#${acao.id}</b>: ${acao.detalhe}</p>
+                    <p><b>#${acao.id}</b>: ${acao.detalhe}</p>
                     ${elementoAcaoDireta}
                 </div>
             </div>
@@ -135,13 +203,65 @@ function alternarSelecaoItemLote(id, coluna, checkboxEl) {
     atualizarBarraFlutuanteLoteUI();
 }
 
+function selecionarTodosDaColuna(chaveColuna) {
+    const listaClientesDaTabela = dadosGlobaisProcessados[chaveColuna];
+    if (!listaClientesDaTabela || listaClientesDaTabela.length === 0) return;
+
+    const inputBusca = document.getElementById('search-input') ||
+        document.getElementById('input-busca') ||
+        document.querySelector('.search-container input') ||
+        document.querySelector('input[type="text"]');
+
+    const termoBusca = inputBusca ? inputBusca.value.toLowerCase().trim() : '';
+
+    const clientesAlvo = listaClientesDaTabela.filter(cliente => {
+        if (!termoBusca) return true;
+
+        const nome = String(cliente.nome || '').toLowerCase();
+        const id = String(cliente.id || '').toLowerCase();
+        const desc = String(cliente.descricaoMapeada || '').toLowerCase();
+        const status = String(cliente.ultimoStatus || '').toLowerCase();
+
+        return nome.includes(termoBusca) || id.includes(termoBusca) || desc.includes(termoBusca) || status.includes(termoBusca);
+    });
+
+    if (clientesAlvo.length === 0) return;
+
+    const todosMarcados = clientesAlvo.every(cliente =>
+        itensSelecionadosLote.some(itemSel => String(itemSel.id) === String(cliente.id))
+    );
+
+    clientesAlvo.forEach(cliente => {
+        const idStr = String(cliente.id);
+
+        if (!todosMarcados) {
+            if (!itensSelecionadosLote.some(itemSel => String(itemSel.id) === idStr)) {
+                itensSelecionadosLote.push({ id: cliente.id, coluna: chaveColuna });
+            }
+        } else {
+            itensSelecionadosLote = itensSelecionadosLote.filter(itemSel => String(itemSel.id) !== idStr);
+        }
+    });
+
+    const tbody = document.getElementById(`table-${chaveColuna}`);
+    if (tbody) {
+        const checkboxesRenderizados = tbody.querySelectorAll('.bulk-row-selector');
+        checkboxesRenderizados.forEach(cb => {
+            const idCb = cb.getAttribute('data-id');
+            cb.checked = itensSelecionadosLote.some(itemSel => String(itemSel.id) === String(idCb));
+        });
+    }
+
+    atualizarBarraFlutuanteLoteUI();
+}
+
 function atualizarBarraFlutuanteLoteUI() {
     const barra = document.getElementById('bulk-actions-bar');
     const contador = document.getElementById('bulk-select-count');
     if (!barra || !contador) return;
 
     const total = itensSelecionadosLote.length;
-    contador.innerText = total;
+    contador.innerText = total.toLocaleString('pt-BR');
 
     if (total > 0) {
         barra.classList.add('visible');
@@ -166,7 +286,7 @@ function executarAcaoEmLote(acao, destinoOpicional = null) {
                 const cliente = dadosGlobaisProcessados[item.coluna].find(c => c.id === item.id);
                 if (cliente) {
                     cliente.verificado = true;
-                    registrarAcaoHistorico('auditoria', cliente.id, `Verificado em lote (${cliente.nome})`);
+                    registrarAcaoHistorico('auditoria', cliente.id, `Verificado em massa (${cliente.nome})`);
                 }
             });
             lancarAlerta(`${totalItens} itens validados com sucesso!`, 'success');
@@ -178,14 +298,14 @@ function executarAcaoEmLote(acao, destinoOpicional = null) {
                 const cliente = dadosGlobaisProcessados[item.coluna].find(c => c.id === item.id);
                 if (cliente) {
                     cliente.verificado = false;
-                    registrarAcaoHistorico('auditoria', cliente.id, `Verificação removida em lote (${cliente.nome})`);
+                    registrarAcaoHistorico('auditoria', cliente.id, `Verificação removida em massa (${cliente.nome})`);
                 }
             });
             lancarAlerta(`${totalItens} itens desmarcados com sucesso!`, 'success');
         }
     }
     else if (acao === 'excluir') {
-        if (confirm(`ATENÇÃO: Deseja deletar permanentemente os ${totalItens} itens selecionados do painel?`)) {
+        if (confirm(`Deseja DELETAR permanentemente os ${totalItens} itens selecionados do painel?`)) {
 
             for (let i = itensSelecionadosLote.length - 1; i >= 0; i--) {
                 const item = itensSelecionadosLote[i];
@@ -196,7 +316,7 @@ function executarAcaoEmLote(acao, destinoOpicional = null) {
                     const clienteCopia = JSON.parse(JSON.stringify(c));
                     clienteCopia._colunaOriginal = item.coluna;
 
-                    registrarAcaoHistorico('excluir', c.id, `Excluído via ação em lote da coluna ${item.coluna.toUpperCase()} (${c.nome})`, clienteCopia);
+                    registrarAcaoHistorico('excluir', c.id, `Excluído por ação em massa da coluna ${item.coluna.toUpperCase()} (${c.nome})`, clienteCopia);
                     lista.splice(index, 1);
                 }
             }
@@ -219,7 +339,7 @@ function executarAcaoEmLote(acao, destinoOpicional = null) {
                 else if (destinoOpicional === 'agendada') cliente.ultimoStatus = 'Agendada';
 
                 dadosGlobaisProcessados[destinoOpicional].push(cliente);
-                registrarAcaoHistorico('editar', cliente.id, `Movido em lote de [${item.coluna.toUpperCase()}] para [${destinoOpicional.toUpperCase()}]`);
+                registrarAcaoHistorico('editar', cliente.id, `Movido em massa de [${item.coluna.toUpperCase()}] para [${destinoOpicional.toUpperCase()}]`);
             }
         });
         lancarAlerta(`${totalItens} itens movidos para ${destinoOpicional.toUpperCase()}.`, 'success');
@@ -236,8 +356,7 @@ function toggleMoverMenu(event) {
     menu.classList.toggle('show');
 }
 
-// Fecha o dropdown se o usuário clicar em qualquer outro lugar da tela
-window.addEventListener('click', function() {
+window.addEventListener('click', function () {
     const menu = document.getElementById('bulk-move-menu');
     if (menu && menu.classList.contains('show')) {
         menu.classList.remove('show');
@@ -279,12 +398,12 @@ function processarExportacaoCustomizada() {
     let baseDadosUnificada = [];
 
     const formatarLinhaCustom = (item, diagnosticoFixo) => {
-        let linhaObj = { "ID Processo": item.id };
-        if (colunasDesejadas.cliente) linhaObj["Cliente / Razão Social"] = item.nome;
-        if (colunasDesejadas.diagnostico) linhaObj["Diagnóstico"] = diagnosticoFixo || item.descricaoMapeada || "Não Informado";
-        if (colunasDesejadas.status) linhaObj["Último Status"] = item.ultimoStatus || "Sem Status";
-        if (colunasDesejadas.auditado) linhaObj["Auditado"] = item.verificado ? "Sim" : "Não";
-        return linhaObj;
+        let textObj = { "ID Processo": item.id };
+        if (colunasDesejadas.cliente) textObj["Cliente / Razão Social"] = item.nome;
+        if (colunasDesejadas.diagnostico) textObj["Diagnóstico"] = diagnosticoFixo || item.descricaoMapeada || "Não Informado";
+        if (colunasDesejadas.status) textObj["Último Status"] = item.ultimoStatus || "Sem Status";
+        if (colunasDesejadas.auditado) textObj["Auditado"] = item.verificado ? "Sim" : "Não";
+        return textObj;
     };
 
     if (statusAtivos.sucesso) dadosGlobaisProcessados.sucesso.forEach(i => baseDadosUnificada.push(formatarLinhaCustom(i, "Retirado")));
@@ -328,6 +447,92 @@ function processarExportacaoCustomizada() {
     lancarAlerta("Exportação customizada concluída!", "success");
 }
 
+function exportarFiltroCompleto() {
+    let todosItens = [];
+
+    const mapearLista = (lista, diagnosticoPadrao) => {
+        return lista.map(item => ({
+            id: item.id,
+            nome: item.nome,
+            diagnostico: diagnosticoPadrao || item.descricaoMapeada || "Não Informado",
+            status: item.ultimoStatus || "Sem Status",
+            auditado: item.verificado ? "Sim" : "Não"
+        }));
+    };
+
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.sucesso, "Retirado"));
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.renegociar, "Renegociar"));
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.urgente, "Não foi agendada"));
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.agendada, "Agendada"));
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.outros, null));
+
+    if (dadosGlobaisProcessados.auditoria.length > 0) {
+        todosItens = todosItens.concat(dadosGlobaisProcessados.auditoria.map(item => ({
+            id: item.id,
+            nome: item.nome,
+            diagnostico: item.descricaoMapeada || "Inconsistência de Dados",
+            status: item.ultimoStatus || "Erro",
+            auditado: item.verificado ? "Sim" : "Não"
+        })));
+    }
+
+    if (todosItens.length === 0) {
+        lancarAlerta("Não existem dados disponíveis para exportação completa.", "error");
+        return;
+    }
+
+    const cabecalhos = [["ID Processo", "Cliente", "Diagnóstico", "Último Status", "Auditado"]];
+    const linhasCorpo = todosItens.map(item => [item.id, item.nome, item.diagnostico, item.status, item.auditado]);
+    const matrizFinal = cabecalhos.concat(linhasCorpo);
+
+    const ws = XLSX.utils.aoa_to_sheet(matrizFinal);
+    ws['!cols'] = [{ wch: 15 }, { wch: 40 }, { wch: 25 }, { wch: 18 }, { wch: 12 }];
+
+    for (let c = 0; c < 5; c++) {
+        const refCel = XLSX.utils.encode_cell({ r: 0, c: c });
+        if (ws[refCel]) {
+            ws[refCel].s = {
+                fill: { patternType: "solid", fgColor: { rgb: "FF6B00" } },
+                font: { name: "Arial", size: 11, bold: true, color: { rgb: "FFFFFF" } },
+                alignment: { horizontal: "center", vertical: "center" }
+            };
+        }
+    }
+
+    for (let r = 1; r < matrizFinal.length; r++) {
+        const refCelDiagnostico = XLSX.utils.encode_cell({ r: r, c: 2 });
+        const celula = ws[refCelDiagnostico];
+
+        if (celula && celula.v) {
+            const valorTexto = String(celula.v).trim().toLowerCase();
+            let corFundoHex = null;
+
+            if (valorTexto === 'retirado') {
+                corFundoHex = "68ff74";
+            } else if (valorTexto === 'renegociar') {
+                corFundoHex = "FFEB9C";
+            } else if (valorTexto === 'não foi agendada' || valorTexto === 'sem sucesso') {
+                corFundoHex = "FFC7CE";
+            } else if (valorTexto === 'agendada' || valorTexto === 'o.s agendada') {
+                corFundoHex = "0051ff";
+            }
+
+            if (corFundoHex) {
+                celula.s = {
+                    fill: { patternType: "solid", fgColor: { rgb: corFundoHex } },
+                    font: { name: "Arial", size: 10, color: { rgb: "000000" } },
+                    border: { bottom: { style: "thin", color: { rgb: "E0E0E0" } } }
+                };
+            }
+        }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Consolidado Geral");
+    XLSX.writeFile(wb, "Relatorio_Inadimplencia_Completo.xlsx");
+    lancarAlerta("Planilha exportada com sucesso!", "success");
+}
+
 function salvarEstadoLocal() {
     const estado = {
         modo: modoProcessoAtivo,
@@ -351,7 +556,7 @@ const passosTutorial = [
     { elementId: 'tour-abas', title: '3. Filtros por Aba', text: 'Alterne rapidamente as visões para focar em status específicos ou abra a aba "Auditoria" para ver erros.' },
     { elementId: 'tour-kpi', title: '4. Contador Geral', text: 'Exibe o total de registros. Se uma pesquisa estiver selecionada, mostrará apenas a soma dos itens encontrados.' },
     { elementId: 'btn-export-completo', title: '5. Exportar', text: 'Você pode baixar a planilha configurada ou parametrizar seu arquivo final clicando aqui.' },
-    { elementId: 'tour-colunas', title: '6. Colunas', text: 'Você pode arrastar as linhas de uma coluna para a outra para mudar o status do cliente, ou arrastar os cabeçalhos para reordenar as tabelas.' },
+    { elementId: 'tour-colunas', title: '6. Colunas', text: 'Você pode arrastar as linhas de uma coluna para a outra para mudar o status do cliente, ou arrastar os cabeçalhos para reordenar las tabelas.' },
     { elementId: 'tour-acoes', title: '7. Ações Rápidas', text: 'Use os botões de ação para: copiar o nome do cliente com 1 clique, marcar o registro como verificado/auditado ou deletá-lo do painel.' }
 ];
 
@@ -467,11 +672,10 @@ function handleFileProccess(file) {
     dropZone.classList.add('arquivado');
     dropZone.style.padding = "20px 40px";
 
-    document.getElementById('file-title').innerText = 'Dados importados de:';
+    document.getElementById('file-title').innerText = 'Dados importados';
     document.getElementById('file-name').style.display = 'block';
     document.getElementById('file-name').innerText = `"${file.name}"`;
     document.getElementById('header-img').setAttribute('src', 'https://raw.githubusercontent.com/soufunck/Filtro-de-OS/refs/heads/main/robo_legal.webp')
-    document.getElementById('header-title').innerText = 'Tudo certo!';
 
     btnReset.style.display = 'block';
     document.getElementById('skeleton-screen').style.display = 'grid';
@@ -511,10 +715,10 @@ function iniciarSistema(modo) {
     badge.style.display = 'inline-block';
 
     if (modo === 'antigo') {
-        badge.innerHTML = 'Modo: Dados Antigos';
+        badge.innerHTML = 'Menu: <span>Dados Antigos</span>';
         lancarAlerta(`Modo "dados antigos" carregado.`, "success");
     } else {
-        badge.innerHTML = 'Modo: Dados Atuais';
+        badge.innerHTML = 'Menu: <span>Dados Atuais</span>';
         lancarAlerta(`Modo "dados atuais" carregado.`, "success");
     }
 
@@ -559,6 +763,7 @@ function processarEAutoditarDados(dados) {
 
         let descricao = '';
 
+
         if (modoProcessoAtivo === 'novo') {
             const valorDescricao = linha['DESCRIÇÃO'] || linha['DESCRICAO'] || linha['DESCRIAAO'] || linha['DIAGNOSTICO'] || linha['DIAGNÓSTICO'] || linha['MENSAGEM'] || linha['Mensagem'];
             descricao = valorDescricao ? String(valorDescricao).trim() : '';
@@ -568,15 +773,53 @@ function processarEAutoditarDados(dados) {
 
             if (textoBruto) {
                 const textoParaAnalise = textoBruto.toLowerCase();
-                if (textoParaAnalise.includes('não retirado') || textoParaAnalise.includes('sem sucesso') || textoParaAnalise.includes('não foi agendada')) {
+
+                if (textoParaAnalise.includes('teste')) {
+                    return registrarAcaoHistorico('auditoria', 'Sistema', `[${id} - ${nome}] foi removido por ter o diagnóstico "teste".`);
+                }
+
+                const termosSemSucesso = [
+                    'não retirado', 'nao retirado', 'sem sucesso', 'não foi agendada', 'nao foi agendada',
+                    'não deixou equipamentos', 'nao deixou equipamentos', 'efetudo retirada dos equipamentos',
+                    'ninguém no local', 'ninguem no local', 'ninguém em casa', 'ninguem em casa',
+                    'não possui mais os equipamentos', 'nao possui mais os equipamentos',
+                    'mudança', 'mudanca', 'mudou', 'mudaram', 'outro endereço', 'outro endereco',
+                    'não mora mais', 'nao mora mais', 'imóvel vazio', 'imovel vazio', 'desocupado',
+                    'casa vazia', 'trocou de endereço', 'trocou de endereco', 'transferiu', 'ninguem atendeu',
+                    'nao reside mais no local', 'não reside mais no local', 'não possui mais os aparelhos',
+                    'recolhidos', 'nao reside mais', 'não reside mais', 'ninguém atendeu', 'ninguem atendeu',
+                    'sem contato', 'coletado', 'não tem mais', 'nao tem mais', 'efetuado retirada'
+                ];
+
+                const termosSucesso = [
+                    'retirado', 'sucesso na retirada', 'entregou os equipamentos',
+                    'entregou o equipamento', 'entregou equipamentos', 'entregou',
+                    'entregues', 'aparelho recolhido', 'aparelhos recolhidos',
+                    'conexão ativada', 'conexao ativada'
+                ];
+
+                const termosNegociacao = [
+                    'renegociar', 'renegociação', 'renegociacao', 'efetuou pagamento',
+                    'efetuou o pagamento', 'pagamento efetuado', 'comprovante', 'pago'
+                ];
+
+                const termosAgendados = [
+                    'reagendado', 'agendada', 'agendado'
+                ];
+
+                if (termosSemSucesso.some(termo => textoParaAnalise.includes(termo))) {
                     descricao = 'Sem sucesso';
-                } else if (textoParaAnalise.includes('reagendado') || textoParaAnalise.includes('agendada')) {
-                    descricao = 'O.S Agendada';
-                } else if (textoParaAnalise.includes('retirado') || textoParaAnalise.includes('sucesso na retirada')) {
+                }
+                else if (termosSucesso.some(termo => textoParaAnalise.includes(termo))) {
                     descricao = 'Retirado';
-                } else if (textoParaAnalise.includes('renegociar') || textoParaAnalise.includes('renegociação')) {
+                }
+                else if (termosNegociacao.some(termo => textoParaAnalise.includes(termo))) {
                     descricao = 'Renegociar';
-                } else {
+                }
+                else if (termosAgendados.some(termo => textoParaAnalise.includes(termo))) {
+                    descricao = 'O.S Agendada';
+                }
+                else {
                     descricao = textoBruto;
                 }
             }
@@ -593,7 +836,7 @@ function processarEAutoditarDados(dados) {
         if (status.toLowerCase() === 'agendada' && (!assunto || !assunto.toLowerCase().includes('retirada'))) {
             listaAuditoria.push({
                 id: id, nome: nome || "Cliente não nomeado",
-                descricaoMapeada: `Mapeado como O.S Agendada, porém escopo do assunto diverge de retirada.`,
+                descricaoMapeada: `Incluido como O.S Agendada, mas o escopo do assunto diverge de retirada.`,
                 ultimoStatus: status, dataHora: dataHora, verificado: false
             });
         }
@@ -605,7 +848,16 @@ function processarEAutoditarDados(dados) {
         });
 
         if (!historicoClientes[id]) {
-            historicoClientes[id] = { id: id, nome: nome, descricaoMapeada: '', ultimoStatus: status, dataHora: dataHora, verificado: false, logsOcorrencia: [] };
+            historicoClientes[id] = {
+                id: id,
+                nome: nome,
+                descricaoMapeada: '',
+                ultimoStatus: status,
+                dataHora: dataHora,
+                verificado: false,
+                logsOcorrencia: [],
+                tags: []
+            };
         }
         if (descricao) historicoClientes[id].descricaoMapeada = descricao;
         if (status) historicoClientes[id].ultimoStatus = status;
@@ -616,6 +868,7 @@ function processarEAutoditarDados(dados) {
     });
 
     dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], outros: [], auditoria: listaAuditoria };
+    resetarLimitesExibicaoAoCarregarArquivo();
 
     Object.values(historicoClientes).forEach(cliente => {
         const descLower = cliente.descricaoMapeada.toLowerCase();
@@ -645,29 +898,29 @@ function renderizarPainelCompleto() {
         dadosGlobaisProcessados.renegociar.length + dadosGlobaisProcessados.agendada.length +
         dadosGlobaisProcessados.outros.length + dadosGlobaisProcessados.auditoria.length;
 
-    document.getElementById('kpi-total-global').innerText = totalRegistros;
+    document.getElementById('kpi-total-global').innerText = totalRegistros.toLocaleString('pt-BR');
     document.getElementById('kpi-total-title').innerText = "Total de Registros";
 
     const tabAuditoriaBtn = document.getElementById('tab-auditoria');
     if (tabAuditoriaBtn) {
         if (dadosGlobaisProcessados.auditoria.length > 0) {
             tabAuditoriaBtn.classList.add('has-errors');
-            tabAuditoriaBtn.innerText = `Auditoria (${dadosGlobaisProcessados.auditoria.length})`;
+            tabAuditoriaBtn.innerText = `Auditoria (${dadosGlobaisProcessados.auditoria.length.toLocaleString('pt-BR')})`;
         } else {
             tabAuditoriaBtn.classList.remove('has-errors');
             tabAuditoriaBtn.innerText = `Erros`;
         }
     }
 
-    atualizarTabelaDOM('table-urgente', dadosGlobaisProcessados.urgente, 'badge-urgente', 'Não foi agendada', 'urgente');
+    atualizarTabelaDOM('table-urgente', dadosGlobaisProcessados.urgente, 'badge-urgente', 'Não foi retirado', 'urgente');
     atualizarTabelaDOM('table-sucesso', dadosGlobaisProcessados.sucesso, 'badge-sucesso', 'Retirado com sucesso', 'sucesso');
-    atualizarTabelaDOM('table-renegociar', dadosGlobaisProcessados.renegociar, 'badge-renegociar', 'Pediu para negociar os débitos', 'renegociar');
-    atualizarTabelaDOM('table-agendada', dadosGlobaisProcessados.agendada, 'badge-agendada', 'O.S Agendada', 'agendada');
+    atualizarTabelaDOM('table-renegociar', dadosGlobaisProcessados.renegociar, 'badge-renegociar', 'Negociado o débito', 'renegociar');
+    atualizarTabelaDOM('table-agendada', dadosGlobaisProcessados.agendada, 'badge-agendada', 'Agendada a O.S', 'agendada');
     atualizarTabelaDOM('table-outros', dadosGlobaisProcessados.outros, 'badge-warning', null, 'outros', true);
 
     atualizarTabelaAuditoriaDOM();
     atualizarPillsContagemColunas();
-    atualizarPainelModificacoesUI(); // Sincroniza os badges e o estado de filtros
+    atualizarPainelModificacoesUI();
 }
 
 //
@@ -677,14 +930,30 @@ function renderizarPainelCompleto() {
 function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, chaveColuna, ehOutros = false) {
     const tbody = document.getElementById(idElemento);
     if (!tbody) return;
-    tbody.innerHTML = '';
 
-    if (listaClientes.length === 0) {
+    const campoBuscaGlobal = document.getElementById('global-search');
+    const termoBusca = campoBuscaGlobal ? campoBuscaGlobal.value.trim().toLowerCase() : '';
+
+    let listaFiltrada = listaClientes;
+    if (termoBusca !== '') {
+        listaFiltrada = listaClientes.filter(cliente => {
+            const dadosBusca = `${cliente.id} ${cliente.nome.toLowerCase()}`;
+            return dadosBusca.includes(termoBusca);
+        });
+    }
+
+    if (listaFiltrada.length === 0) {
         tbody.innerHTML = `<tr><td colspan="3" class="no-data">Nenhum registro.</td></tr>`;
+        removerGatilhoScrollAnterior(chaveColuna);
         return;
     }
 
-    listaClientes.forEach(cliente => {
+    const limiteAtual = limitesExibicaoStatus[chaveColuna] || TAMANHO_LOTE_RENDERIZACAO;
+    const itensVisiveis = listaFiltrada.slice(0, limiteAtual);
+
+    tbody.innerHTML = '';
+
+    itensVisiveis.forEach(cliente => {
         const tr = document.createElement('tr');
         tr.setAttribute('draggable', 'true');
         tr.setAttribute('data-id', cliente.id);
@@ -716,18 +985,27 @@ function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, 
         const badgeTextoFinal = ehOutros ? (cliente.descricaoMapeada || 'Não informado') : textoBadge;
         const nomeEscapado = cliente.nome.replace(/'/g, "\\'");
 
-        // CORREÇÃO: Checkbox e ID agora dividem o mesmo <td>
+        let idExibicao = cliente.id;
+        let nomeExibicao = cliente.nome;
+        if (termoBusca !== '') {
+            idExibicao = aplicarDestaqueString(cliente.id, termoBusca);
+            nomeExibicao = aplicarDestaqueString(cliente.nome, termoBusca);
+        }
+
+        const tagsAtivasHtml = (cliente.tags || []).map(t => `<span class="tag-pill ${t.classe}">${t.texto}</span>`).join('');
+
         tr.innerHTML = `
             <td>
                 <label class="row-check-container" onclick="event.stopPropagation();" data-tooltip="Selecionar">
                     <input type="checkbox" class="bulk-row-selector" data-id="${cliente.id}" ${itensSelecionadosLote.some(i => i.id === cliente.id) ? 'checked' : ''} onchange="alternarSelecaoItemLote('${cliente.id}', '${chaveColuna}', this)">
                     <span class="row-checkmark"></span>
                 </label>
-                <span class="client-id match-target-id">${cliente.id}</span>
+                <span class="client-id match-target-id">${idExibicao}</span>
             </td>
             <td>
                 <div class="client-name-wrapper">
-                    <div class="client-name match-target-name">${cliente.nome}</div>
+                    <div class="client-name match-target-name">${nomeExibicao}</div>
+                </div>
                     <span class="badge ${classeBadge}">${badgeTextoFinal}</span>
                 </div>
             </td>
@@ -749,19 +1027,45 @@ function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, 
         `;
         tbody.appendChild(tr);
     });
+
+    removerGatilhoScrollAnterior(chaveColuna);
+
+    if (listaFiltrada.length > limiteAtual) {
+        const elementoGatilho = criarElementoGatilhoScroll(chaveColuna, 'tbody');
+        tbody.appendChild(elementoGatilho);
+        ativarIntersectionObserver(elementoGatilho, chaveColuna, tbody, () => {
+            atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, chaveColuna, ehOutros);
+        });
+    }
 }
 
 function atualizarTabelaAuditoriaDOM() {
     const tbody = document.getElementById('table-auditoria');
     if (!tbody) return;
-    tbody.innerHTML = '';
 
-    if (dadosGlobaisProcessados.auditoria.length === 0) {
+    const campoBuscaGlobal = document.getElementById('global-search');
+    const termoBusca = campoBuscaGlobal ? campoBuscaGlobal.value.trim().toLowerCase() : '';
+
+    let listaFiltrada = dadosGlobaisProcessados.auditoria;
+    if (termoBusca !== '') {
+        listaFiltrada = dadosGlobaisProcessados.auditoria.filter(err => {
+            const dadosBusca = `${err.id} ${err.nome.toLowerCase()}`;
+            return dadosBusca.includes(termoBusca);
+        });
+    }
+
+    if (listaFiltrada.length === 0) {
         tbody.innerHTML = `<tr><td colspan="3" class="no-data" style="color: var(--sucesso);">Nenhum erro encontrado.</td></tr>`;
+        removerGatilhoScrollAnterior('auditoria');
         return;
     }
 
-    dadosGlobaisProcessados.auditoria.forEach(err => {
+    const limiteAtual = limitesExibicaoStatus['auditoria'] || TAMANHO_LOTE_RENDERIZACAO;
+    const itensVisiveis = listaFiltrada.slice(0, limiteAtual);
+
+    tbody.innerHTML = '';
+
+    itensVisiveis.forEach(err => {
         const tr = document.createElement('tr');
         tr.setAttribute('data-search', `${err.id} ${err.nome.toLowerCase()}`);
         tr.setAttribute('data-raw-id', err.id);
@@ -797,17 +1101,23 @@ function atualizarTabelaAuditoriaDOM() {
 
         const nomeEscapado = err.nome.replace(/'/g, "\\'");
 
-        // CORREÇÃO: Checkbox e ID agora dividem o mesmo <td>
+        let idExibicao = err.id;
+        let nomeExibicao = err.nome;
+        if (termoBusca !== '') {
+            idExibicao = aplicarDestaqueString(err.id, termoBusca);
+            nomeExibicao = aplicarDestaqueString(err.nome, termoBusca);
+        }
+
         tr.innerHTML = `
             <td style="position: relative; padding-left: 36px;">
                 <label class="row-check-container" onclick="event.stopPropagation();">
                     <input type="checkbox" class="bulk-row-selector" data-id="${err.id}" ${itensSelecionadosLote.some(i => i.id === err.id) ? 'checked' : ''} onchange="alternarSelecaoItemLote('${err.id}', 'auditoria', this)">
                     <span class="row-checkmark"></span>
                 </label>
-                <span class="client-id match-target-id" style="background: rgba(244,63,94,0.05); border-color: rgba(244,63,94,0.2); color: #f43f5e;">${err.id}</span>
+                <span class="client-id match-target-id" style="background: rgba(244,63,94,0.05); border-color: rgba(244,63,94,0.2); color: #f43f5e;">${idExibicao}</span>
             </td>
             <td>
-                <div class="client-name match-target-name" style="color: #f43f5e;">${err.nome}</div>
+                <div class="client-name match-target-name" style="color: #f43f5e;">${nomeExibicao}</div>
                 <span class="badge badge-error-reason">${err.descricaoMapeada}</span>
             </td>
             <td class="col-btn" style="position: relative;">
@@ -826,15 +1136,32 @@ function atualizarTabelaAuditoriaDOM() {
         `;
         tbody.appendChild(tr);
     });
+
+    removerGatilhoScrollAnterior('auditoria');
+
+    if (listaFiltrada.length > limiteAtual) {
+        const elementoGatilho = criarElementoGatilhoScroll('auditoria', 'tbody');
+        tbody.appendChild(elementoGatilho);
+        ativarIntersectionObserver(elementoGatilho, 'auditoria', tbody, () => {
+            atualizarTabelaAuditoriaDOM();
+        });
+    }
 }
 
 function filtrarDadosEmTempoReal() {
     const termo = document.getElementById('global-search').value.trim();
     const termoLower = termo.toLowerCase();
     const tabelasIds = ['table-urgente', 'table-sucesso', 'table-renegociar', 'table-agendada', 'table-outros', 'table-auditoria'];
+    const subtitle = document.getElementById('kpi-total-subtitle');
 
     if (termo === '') {
-        let somaTotalPadrao = 0;
+        const somaTotalPadrao = dadosGlobaisProcessados.urgente.length +
+            dadosGlobaisProcessados.sucesso.length +
+            dadosGlobaisProcessados.renegociar.length +
+            dadosGlobaisProcessados.agendada.length +
+            dadosGlobaisProcessados.outros.length +
+            dadosGlobaisProcessados.auditoria.length;
+
         tabelasIds.forEach(idTab => {
             const tbody = document.getElementById(idTab);
             if (!tbody) return;
@@ -850,15 +1177,14 @@ function filtrarDadosEmTempoReal() {
                 if (targetIdNode) targetIdNode.innerText = linha.getAttribute('data-raw-id') || '';
                 if (targetNameNode) targetNameNode.innerText = inlineObterTextoRaw(linha, 'data-raw-name') || '';
             });
-
-            const nLinhasEfetivas = tbody.querySelectorAll('tr:not(:has(.no-data))').length;
-            const badgeContador = document.getElementById(idTab.replace('table-', 'count-'));
-            if (badgeContador) badgeContador.innerText = nLinhasEfetivas;
-            somaTotalPadrao += nLinhasEfetivas;
         });
 
-        document.getElementById('kpi-total-global').innerText = somaTotalPadrao;
+        atualizarPillsContagemColunas();
+
+        document.getElementById('kpi-total-global').innerText = somaTotalPadrao.toLocaleString('pt-BR');
         document.getElementById('kpi-total-title').innerText = "Total de Registros";
+        if (subtitle) subtitle.innerText = '';
+
         return;
     }
 
@@ -875,7 +1201,7 @@ function filtrarDadosEmTempoReal() {
             if (linha.querySelector('.no-data')) return;
 
             const dadosBusca = linha.getAttribute('data-search') || '';
-            const targetIdNode = linha.querySelector('.match-target-id');
+            const targetIdNode = inlineObterTargetNode(linha, '.match-target-id') || linha.querySelector('.match-target-id');
             const targetNameNode = linha.querySelector('.match-target-name');
 
             const rawId = inlineObterTextoRaw(linha, 'data-raw-id');
@@ -893,7 +1219,7 @@ function filtrarDadosEmTempoReal() {
         });
 
         const badgeContador = document.getElementById(idTab.replace('table-', 'count-'));
-        if (badgeContador) badgeContador.innerText = linhasVisiveisNaTabela;
+        if (badgeContador) badgeContador.innerText = linhasVisiveisNaTabela.toLocaleString('pt-BR');
         acumularSomaFiltrada += linhasVisiveisNaTabela;
 
         if (card) {
@@ -905,10 +1231,9 @@ function filtrarDadosEmTempoReal() {
         }
     });
 
-    document.getElementById('kpi-total-global').innerText = acumularSomaFiltrada;
+    document.getElementById('kpi-total-global').innerText = acumularSomaFiltrada.toLocaleString('pt-BR');
     document.getElementById('kpi-total-title').innerText = "Resultados encontrados";
-    const subtitle = document.getElementById('kpi-total-subtitle');
-    if (subtitle) subtitle.innerText = `Filtrado pelo termo: "${termo}"`;
+    if (subtitle) subtitle.innerText = `itens encontrados pelo termo: "${termo}"`;
 }
 
 function inlineObterTargetNode(row, selector) { return row.querySelector(selector); }
@@ -1015,7 +1340,6 @@ function resetarDashboardGlobal() {
     document.getElementById('file-title').innerText = 'Clique para abrir o arquivo ou arraste aqui.';
     document.getElementById('file-name').style.display = 'none';
     document.getElementById('header-img').setAttribute('src', 'https://raw.githubusercontent.com/soufunck/Filtro-de-OS/refs/heads/main/robo_hello.webp')
-    document.getElementById('header-title').innerText = 'Oi! Seja bem-vindo(a)';
 
     btnReset.style.display = 'none';
     document.getElementById('btn-tutorial-guia').style.display = 'none';
@@ -1025,6 +1349,7 @@ function resetarDashboardGlobal() {
     atualizarBarraFlutuanteLoteUI();
     dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], outros: [], auditoria: [] };
     repositorioCompletoPorID = {};
+    resetarLimitesExibicaoAoCarregarArquivo();
     renderizarPainelCompleto();
     mudarVisaoAba('todas', document.querySelectorAll('.tab-btn')[0]);
 }
@@ -1044,7 +1369,7 @@ function atualizarPillsContagemColunas() {
 
     Object.entries(elements).forEach(([id, value]) => {
         const el = document.getElementById(id);
-        if (el) el.innerText = value;
+        if (el) el.innerText = Number(value).toLocaleString('pt-BR');
     });
 }
 
@@ -1052,6 +1377,61 @@ function copiarApenasNome(nomeCliente, event) {
     event.stopPropagation();
     navigator.clipboard.writeText(nomeCliente).then(() => lancarAlerta("Copiado para área de transferência.", "success"));
 }
+
+const OPCOES_TAGS_SISTEMA = [
+    { texto: 'Sem Contato', classe: 'tag-muted' },
+    { texto: 'Promessa Pgto', classe: 'tag-renegociar' },
+    { texto: 'Sócio Irritado', classe: 'tag-urgente' },
+    { texto: 'Retorno Urgente', classe: 'tag-auditoria' },
+    { texto: 'Aguardando Retorno', classe: 'tag-agendada' }
+];
+
+let clienteIdTagAtivo = null;
+
+function alternarMenuTagsGlobal(idCliente, botaoEl, event) {
+    event.stopPropagation();
+    
+    let menu = document.getElementById('global-tags-dropdown');
+    
+    if (menu && menu.style.display === 'block' && clienteIdTagAtivo === idCliente) {
+        menu.style.display = 'none';
+        return;
+    }
+
+    clienteIdTagAtivo = idCliente;
+
+    let clienteAlvo = null;
+    for (const coluna in dadosGlobaisProcessados) {
+        clienteAlvo = dadosGlobaisProcessados[coluna].find(c => String(c.id) === String(idCliente));
+        if (clienteAlvo) break;
+    }
+    
+    if (!clienteAlvo) return;
+    if (!clienteAlvo.tags) clienteAlvo.tags = [];
+
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'global-tags-dropdown';
+        menu.className = 'global-tags-menu';
+        document.body.appendChild(menu);
+    }
+
+    menu.innerHTML = OPCOES_TAGS_SISTEMA.map(opcao => {
+        const jaPossui = clienteAlvo.tags.some(t => t.texto === opcao.texto);
+        return `
+            <div class="tags-menu-item ${jaPossui ? 'active' : ''}" onclick="aplicarTagNoCliente('${opcao.texto}', '${opcao.classe}')">
+                <span class="tag-pill ${opcao.classe}">${opcao.texto}</span>
+                ${jaPossui ? '<span class="check-icon">✓</span>' : ''}
+            </div>
+        `;
+    }).join('');
+
+    const rect = botaoEl.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    menu.style.left = `${rect.left + window.scrollX - 110}px`;
+    menu.style.display = 'block';
+}
+
 
 function exportarColunaParaExcel(chaveColuna, nomeArquivo) {
     const listaRaw = dadosGlobaisProcessados[chaveColuna];
