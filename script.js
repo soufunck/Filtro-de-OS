@@ -3,7 +3,7 @@ const fileInput = document.getElementById('excel-file');
 const btnReset = document.getElementById('btn-reset');
 const tooltipEl = document.getElementById('custom-tooltip');
 
-let dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], outros: [], auditoria: [] };
+let dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], perdidos: [], outros: [], auditoria: [] };
 let repositorioCompletoPorID = {};
 
 let itemArrastadoContexto = null;
@@ -23,7 +23,8 @@ let limitesExibicaoStatus = {
     renegociar: TAMANHO_LOTE_RENDERIZACAO,
     agendada: TAMANHO_LOTE_RENDERIZACAO,
     outros: TAMANHO_LOTE_RENDERIZACAO,
-    auditoria: TAMANHO_LOTE_RENDERIZACAO
+    auditoria: TAMANHO_LOTE_RENDERIZACAO,
+    perdidos: TAMANHO_LOTE_RENDERIZACAO
 };
 
 let observadoresScrollAtivos = {};
@@ -160,10 +161,12 @@ function atualizarPainelModificacoesUI() {
     }).join('');
 }
 
-function filtrarTipoHistórico(tipo, botao) {
+function filtrarTipoHistorico(tipo, botao) {
     filtroHistoricoAtivo = tipo;
+
     document.querySelectorAll('.btn-filter-mod').forEach(btn => btn.classList.remove('active'));
     botao.classList.add('active');
+
     atualizarPainelModificacoesUI();
 }
 
@@ -384,7 +387,8 @@ function processarExportacaoCustomizada() {
         renegociar: document.getElementById('exp-status-renegociar').checked,
         agendada: document.getElementById('exp-status-agendada').checked,
         outros: document.getElementById('exp-status-outros').checked,
-        auditoria: document.getElementById('exp-status-auditoria').checked
+        auditoria: document.getElementById('exp-status-auditoria').checked,
+        perdidos: document.getElementById('exp-status-perdidos').checked
     };
 
     const colunasDesejadas = {
@@ -412,6 +416,7 @@ function processarExportacaoCustomizada() {
     if (statusAtivos.agendada) dadosGlobaisProcessados.agendada.forEach(i => baseDadosUnificada.push(formatarLinhaCustom(i, "Agendada")));
     if (statusAtivos.outros) dadosGlobaisProcessados.outros.forEach(i => baseDadosUnificada.push(formatarLinhaCustom(i, null)));
     if (statusAtivos.auditoria) dadosGlobaisProcessados.auditoria.forEach(i => baseDadosUnificada.push(formatarLinhaCustom(i, i.descricaoMapeada || "Inconsistência")));
+    if (statusAtivos.perdidos) dadosGlobaisProcessados.perdidos.forEach(i => baseDadosUnificada.push(formatarLinhaCustom(i, "Equipamento perdido")));
 
     if (baseDadosUnificada.length === 0) {
         lancarAlerta("Nenhum dado selecionado corresponde aos seus filtros de exportação.", "error");
@@ -465,6 +470,7 @@ function exportarFiltroCompleto() {
     todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.urgente, "Não foi agendada"));
     todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.agendada, "Agendada"));
     todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.outros, null));
+    todosItens = todosItens.concat(mapearLista(dadosGlobaisProcessados.perdidos, "Equipamentos perdidos"));
 
     if (dadosGlobaisProcessados.auditoria.length > 0) {
         todosItens = todosItens.concat(dadosGlobaisProcessados.auditoria.map(item => ({
@@ -515,6 +521,8 @@ function exportarFiltroCompleto() {
                 corFundoHex = "FFC7CE";
             } else if (valorTexto === 'agendada' || valorTexto === 'o.s agendada') {
                 corFundoHex = "0051ff";
+            } else if (valorTexto === 'equipamento perdido' || valorTexto === 'equipamentos perdidos') {
+                corFundoHex = "FFB266";
             }
 
             if (corFundoHex) {
@@ -739,6 +747,15 @@ function processarEAutoditarDados(dados) {
     repositorioCompletoPorID = {};
     const listaAuditoria = [];
 
+    const parseDataBR = (dataStr) => {
+        if (!dataStr || dataStr === 'Sem data') return Infinity;
+        const partes = dataStr.split(/[\s/:]+/);
+        if (partes.length >= 3) {
+            return new Date(partes[2], partes[1] - 1, partes[0], partes[3] || 0, partes[4] || 0).getTime();
+        }
+        return Infinity;
+    };
+
     dados.forEach((linha, index) => {
         const idBruto = linha['ID'];
         const nLinhaPlanilha = index + 2;
@@ -858,16 +875,25 @@ function processarEAutoditarDados(dados) {
                 logsOcorrencia: [],
                 tags: []
             };
+        } else {
+            if (dataHora && dataHora !== 'Sem data') {
+                const dataAtualSalva = parseDataBR(historicoClientes[id].dataHora);
+                const novaDataEncontrada = parseDataBR(dataHora);
+
+                if (novaDataEncontrada < dataAtualSalva) {
+                    historicoClientes[id].dataHora = dataHora;
+                }
+            }
         }
+
         if (descricao) historicoClientes[id].descricaoMapeada = descricao;
         if (status) historicoClientes[id].ultimoStatus = status;
-        if (dataHora) historicoClientes[id].dataHora = dataHora;
         if (nome && !historicoClientes[id].nome) historicoClientes[id].nome = nome;
 
         historicoClientes[id].logsOcorrencia.push({ desc: descricao.toLowerCase(), status: status.toLowerCase() });
     });
 
-    dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], outros: [], auditoria: listaAuditoria };
+    dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], perdidos: [], outros: [], auditoria: listaAuditoria };
     resetarLimitesExibicaoAoCarregarArquivo();
 
     Object.values(historicoClientes).forEach(cliente => {
@@ -875,17 +901,23 @@ function processarEAutoditarDados(dados) {
         const statusLower = cliente.ultimoStatus.toLowerCase();
 
         if (modoProcessoAtivo === 'novo') {
-            if (statusLower === 'agendada') dadosGlobaisProcessados.agendada.push(cliente);
+            if (statusLower === 'aberta') dadosGlobaisProcessados.urgente.push(cliente);
+            else if (statusLower === 'agendada') dadosGlobaisProcessados.agendada.push(cliente);
             else if (descLower === 'sem sucesso') dadosGlobaisProcessados.urgente.push(cliente);
             else if (descLower === 'retirado') dadosGlobaisProcessados.sucesso.push(cliente);
             else if (descLower === 'renegociar') dadosGlobaisProcessados.renegociar.push(cliente);
+            else if (descLower === 'equipamentos perdidos') dadosGlobaisProcessados.perdidos.push(cliente);
+            else if (descLower.includes('pagamento realizado, conexão ativada')) dadosGlobaisProcessados.renegociar.push(cliente);
             else if (cliente.descricaoMapeada) dadosGlobaisProcessados.outros.push(cliente);
+            else dadosGlobaisProcessados.outros.push(cliente);
         } else {
-            if (statusLower === 'agendada' || descLower === 'o.s agendada') dadosGlobaisProcessados.agendada.push(cliente);
+            if (statusLower === 'aberta' || descLower === 'equipamentos perdidos') dadosGlobaisProcessados.urgente.push(cliente);
+            else if (statusLower === 'agendada' || descLower === 'o.s agendada') dadosGlobaisProcessados.agendada.push(cliente);
             else if (descLower === 'sem sucesso' || descLower === 'não retirado') dadosGlobaisProcessados.urgente.push(cliente);
             else if (descLower === 'retirado') dadosGlobaisProcessados.sucesso.push(cliente);
             else if (descLower === 'renegociar') dadosGlobaisProcessados.renegociar.push(cliente);
             else if (cliente.descricaoMapeada) dadosGlobaisProcessados.outros.push(cliente);
+            else dadosGlobaisProcessados.outros.push(cliente);
         }
     });
 
@@ -894,9 +926,15 @@ function processarEAutoditarDados(dados) {
 
 // RENDERIZAÇÃO
 function renderizarPainelCompleto() {
-    const totalRegistros = dadosGlobaisProcessados.urgente.length + dadosGlobaisProcessados.sucesso.length +
-        dadosGlobaisProcessados.renegociar.length + dadosGlobaisProcessados.agendada.length +
-        dadosGlobaisProcessados.outros.length + dadosGlobaisProcessados.auditoria.length;
+    const totalRegistros =
+        dadosGlobaisProcessados.urgente.length +
+        dadosGlobaisProcessados.sucesso.length +
+        dadosGlobaisProcessados.renegociar.length +
+        dadosGlobaisProcessados.agendada.length +
+        dadosGlobaisProcessados.outros.length +
+        dadosGlobaisProcessados.auditoria.length +
+        dadosGlobaisProcessados.perdidos.length;
+
 
     document.getElementById('kpi-total-global').innerText = totalRegistros.toLocaleString('pt-BR');
     document.getElementById('kpi-total-title').innerText = "Total de Registros";
@@ -912,11 +950,30 @@ function renderizarPainelCompleto() {
         }
     }
 
+
+    const dadosRenegociarCustomizados = dadosGlobaisProcessados.renegociar.map(cliente => {
+        let textoBadgeCustomizado = 'Negociado o débito';
+
+        const descLower = (cliente.descricaoMapeada || '').toLowerCase();
+
+        if (descLower.includes('pagamento realizado, conexão ativada')) {
+            textoBadgeCustomizado = 'Pagou e reativou';
+        } else if (descLower.includes('renegociar')) {
+            textoBadgeCustomizado = 'Pediu para renegociar';
+        }
+
+        return {
+            ...cliente,
+            textoBadgeCustomizado: textoBadgeCustomizado
+        };
+    });
+
     atualizarTabelaDOM('table-urgente', dadosGlobaisProcessados.urgente, 'badge-urgente', 'Não foi retirado', 'urgente');
     atualizarTabelaDOM('table-sucesso', dadosGlobaisProcessados.sucesso, 'badge-sucesso', 'Retirado com sucesso', 'sucesso');
-    atualizarTabelaDOM('table-renegociar', dadosGlobaisProcessados.renegociar, 'badge-renegociar', 'Negociado o débito', 'renegociar');
+    atualizarTabelaDOM('table-renegociar', dadosRenegociarCustomizados, 'badge-renegociar', null, 'renegociar', true);
     atualizarTabelaDOM('table-agendada', dadosGlobaisProcessados.agendada, 'badge-agendada', 'Agendada a O.S', 'agendada');
     atualizarTabelaDOM('table-outros', dadosGlobaisProcessados.outros, 'badge-warning', null, 'outros', true);
+    atualizarTabelaDOM('table-perdidos', dadosGlobaisProcessados.perdidos, 'badge-perdidos', 'Equipamentos perdidos', 'perdidos', false);
 
     atualizarTabelaAuditoriaDOM();
     atualizarPillsContagemColunas();
@@ -958,8 +1015,7 @@ function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, 
         tr.setAttribute('draggable', 'true');
         tr.setAttribute('data-id', cliente.id);
         tr.setAttribute('data-origin', chaveColuna);
-        tr.setAttribute('data-search', `${cliente.id} ${cliente.nome.toLowerCase()}`);
-        tr.setAttribute('data-raw-id', cliente.id);
+        tr.setAttribute('data-search', `${cliente.id} ${cliente.nome.toLowerCase()} ${cliente.dataHora}`); tr.setAttribute('data-raw-id', cliente.id);
         tr.setAttribute('data-raw-name', cliente.nome);
 
         if (cliente.verificado) tr.classList.add('row-verified');
@@ -982,7 +1038,18 @@ function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, 
             linhaSendoArrastada = null; itemArrastadoContexto = null;
         });
 
-        const badgeTextoFinal = ehOutros ? (cliente.descricaoMapeada || 'Não informado') : textoBadge;
+        let badgeTextoFinal = ehOutros ? (cliente.descricaoMapeada || 'Não informado') : textoBadge;
+
+        if (cliente.textoBadgeCustomizado) {
+            badgeTextoFinal = cliente.textoBadgeCustomizado;
+        } else if (chaveColuna === 'urgente' && cliente.ultimoStatus && cliente.ultimoStatus.toLowerCase() === 'aberta') {
+            badgeTextoFinal = 'Em aberto';
+        }
+
+        if (chaveColuna === 'urgente' && cliente.ultimoStatus && cliente.ultimoStatus.toLowerCase() === 'aberta') {
+            badgeTextoFinal = 'Em aberto';
+        }
+
         const nomeEscapado = cliente.nome.replace(/'/g, "\\'");
 
         let idExibicao = cliente.id;
@@ -1004,8 +1071,17 @@ function atualizarTabelaDOM(idElemento, listaClientes, classeBadge, textoBadge, 
             </td>
             <td>
                 <div class="client-name-wrapper">
-                    <div class="client-name match-target-name">${nomeExibicao}</div>
-                </div>
+                    <div class="client-name match-target-name">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6m2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0m4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4m-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10s-3.516.68-4.168 1.332c-.678.678-.83 1.418-.832 1.664z"/></svg> 
+                        ${nomeExibicao}
+                    </div>
+                    
+                    <div class="client-date">
+                        <svg viewBox="0 0 24 24" style="width: 10px; height: 10px; fill: currentColor;"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>
+                        Aberto em
+                        ${cliente.dataHora || 'Data não informada'}
+                    </div>
+
                     <span class="badge ${classeBadge}">${badgeTextoFinal}</span>
                 </div>
             </td>
@@ -1151,7 +1227,7 @@ function atualizarTabelaAuditoriaDOM() {
 function filtrarDadosEmTempoReal() {
     const termo = document.getElementById('global-search').value.trim();
     const termoLower = termo.toLowerCase();
-    const tabelasIds = ['table-urgente', 'table-sucesso', 'table-renegociar', 'table-agendada', 'table-outros', 'table-auditoria'];
+    const tabelasIds = ['table-urgente', 'table-sucesso', 'table-renegociar', 'table-agendada', 'table-outros', 'table-auditoria', 'table-perdidos'];
     const subtitle = document.getElementById('kpi-total-subtitle');
 
     if (termo === '') {
@@ -1160,7 +1236,8 @@ function filtrarDadosEmTempoReal() {
             dadosGlobaisProcessados.renegociar.length +
             dadosGlobaisProcessados.agendada.length +
             dadosGlobaisProcessados.outros.length +
-            dadosGlobaisProcessados.auditoria.length;
+            dadosGlobaisProcessados.auditoria.length +
+            dadosGlobaisProcessados.perdidos.length;
 
         tabelasIds.forEach(idTab => {
             const tbody = document.getElementById(idTab);
@@ -1289,24 +1366,104 @@ function removerClienteDoPainel(id, coluna, event) {
 function abrirModalHistorico(id, nome) {
     const modal = document.getElementById('history-modal');
     if (!modal) return;
+
     document.getElementById('modal-client-name').innerText = nome;
     document.getElementById('modal-client-id').innerText = `ID Processo — ${id}`;
 
     const timelineContainer = document.getElementById('modal-timeline-content');
     timelineContainer.innerHTML = '';
 
-    const logs = repositorioCompletoPorID[id];
-    if (!logs || logs.length === 0) {
+    const logs = repositorioCompletoPorID[id] || [];
+    const mapaHistorico = new Map();
+
+    logs.forEach((item) => {
+        const chave = `${item.data}-${item.assunto || ''}-${item.descricao}-${item.status}`;
+
+        if (mapaHistorico.has(chave)) {
+            const registroExistente = mapaHistorico.get(chave);
+            registroExistente.repeticoes += 1;
+            // Salva os itens idênticos no array de duplicados
+            registroExistente.duplicados.push(item);
+        } else {
+            mapaHistorico.set(chave, {
+                ...item,
+                repeticoes: 0,
+                duplicados: [] // Cria o repositório oculto
+            });
+        }
+    });
+
+    const historicoUnico = Array.from(mapaHistorico.values());
+
+    if (historicoUnico.length === 0) {
         timelineContainer.innerHTML = '<p class="no-data">Nada encontrado.</p>';
     } else {
-        logs.forEach(log => {
+        historicoUnico.forEach((log, index) => {
             const item = document.createElement('div');
             item.className = 'timeline-item';
+
+            let blocoDuplicados = '';
+
+            if (log.repeticoes > 0) {
+                const plural = log.repeticoes > 1 ? 'outros repetidos' : 'outro repetido';
+
+                // Monta os cards ocultos de duplicatas
+                const itensOcultosHTML = log.duplicados.map(dup => `
+                    <div class="timeline-duplicated-item">
+                        <div class="timeline-date">
+                            <svg viewBox="0 0 24 24" style="width: 10px; height: 10px; fill: currentColor;"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>
+                            ${dup.data}
+                        </div>
+
+                        <div class="timeline-body">
+                            <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/></svg>
+                            <strong>Assunto</strong>: ${dup.assunto || 'Sem Assunto'}
+                        </div>
+                        <div class="timeline-body">
+                            <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M2 4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v11.5a.5.5 0 0 1-.777.416L7 13.101l-4.223 2.815A.5.5 0 0 1 2 15.5z"/><path d="M4.268 1A2 2 0 0 1 6 0h6a2 2 0 0 1 2 2v11.5a.5.5 0 0 1-.777.416L13 13.768V2a1 1 0 0 0-1-1z"/></svg>
+                            <strong>Diagnóstico</strong>: ${dup.descricao}
+                        </div>
+                        <div class="timeline-body">
+                            <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+                            <strong>Status</strong>: ${dup.status}
+                        </div>
+                    </div>
+                `).join('');
+
+                blocoDuplicados = `
+                    <div style="display: flex; align-items: center; flex-direction: margin-top: 8px;">
+                        <div class="timeline-duplicates-alert" style="margin-top: 8px;">${log.repeticoes} ${plural}
+                        <button class="btn-ver-repetidos" onclick="
+                            const el = document.getElementById('dup-${index}');
+                            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                        ">Ver</button></div>
+                    </div>
+
+                    <div id="dup-${index}" style="display: none; margin-top: 12px; padding-left: 12px; border-left: 2px dashed rgba(255,107,0,0.3);">
+                        ${itensOcultosHTML}
+                    </div>
+                `;
+            }
+
             item.innerHTML = `
-                    <div class="timeline-date">${log.data}</div>
-                    <div class="timeline-body"><strong>Assunto</strong>: ${log.assunto || 'Sem Assunto'}</div>
-                    <div class="timeline-body"><strong>Diagnóstico</strong>: ${log.descricao}</div>
-                    <div class="timeline-body"><strong>Status</strong>: ${log.status}</div>
+                    <div class="timeline-date">
+                        <svg viewBox="0 0 24 24" style="width: 10px; height: 10px; fill: currentColor;"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>
+                        ${log.data}
+                    </div>
+
+                    <div class="timeline-body">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/></svg>
+                        <strong>Assunto</strong>: ${log.assunto || 'Sem Assunto'}
+                    </div>
+                    <div class="timeline-body">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M2 4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v11.5a.5.5 0 0 1-.777.416L7 13.101l-4.223 2.815A.5.5 0 0 1 2 15.5z"/><path d="M4.268 1A2 2 0 0 1 6 0h6a2 2 0 0 1 2 2v11.5a.5.5 0 0 1-.777.416L13 13.768V2a1 1 0 0 0-1-1z"/></svg>
+                        <strong>Diagnóstico</strong>: ${log.descricao}
+                    </div>
+                    <div class="timeline-body">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 10px; height: 10px; fill: currentColor;" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+                        <strong>Status</strong>: ${log.status}
+                    </div>
+                    ${blocoDuplicados}
                 `;
             timelineContainer.appendChild(item);
         });
@@ -1347,7 +1504,16 @@ function resetarDashboardGlobal() {
     document.getElementById('results-dashboard').classList.remove('visible');
 
     atualizarBarraFlutuanteLoteUI();
-    dadosGlobaisProcessados = { urgente: [], sucesso: [], renegociar: [], agendada: [], outros: [], auditoria: [] };
+    dadosGlobaisProcessados = {
+        urgente: [],
+        sucesso: [],
+        renegociar: [],
+        agendada: [],
+        outros: [],
+        auditoria: [],
+        perdidos: []
+    };
+
     repositorioCompletoPorID = {};
     resetarLimitesExibicaoAoCarregarArquivo();
     renderizarPainelCompleto();
@@ -1364,7 +1530,8 @@ function atualizarPillsContagemColunas() {
         'count-renegociar': dadosGlobaisProcessados.renegociar.length,
         'count-agendada': dadosGlobaisProcessados.agendada.length,
         'count-outros': dadosGlobaisProcessados.outros.length,
-        'count-auditoria': dadosGlobaisProcessados.auditoria.length
+        'count-auditoria': dadosGlobaisProcessados.auditoria.length,
+        'count-perdidos': dadosGlobaisProcessados.perdidos.length
     };
 
     Object.entries(elements).forEach(([id, value]) => {
@@ -1390,9 +1557,9 @@ let clienteIdTagAtivo = null;
 
 function alternarMenuTagsGlobal(idCliente, botaoEl, event) {
     event.stopPropagation();
-    
+
     let menu = document.getElementById('global-tags-dropdown');
-    
+
     if (menu && menu.style.display === 'block' && clienteIdTagAtivo === idCliente) {
         menu.style.display = 'none';
         return;
@@ -1405,7 +1572,7 @@ function alternarMenuTagsGlobal(idCliente, botaoEl, event) {
         clienteAlvo = dadosGlobaisProcessados[coluna].find(c => String(c.id) === String(idCliente));
         if (clienteAlvo) break;
     }
-    
+
     if (!clienteAlvo) return;
     if (!clienteAlvo.tags) clienteAlvo.tags = [];
 
@@ -1549,4 +1716,34 @@ function transferirClienteDeColuna(id, origem, destino) {
 
     renderizarPainelCompleto();
     filtrarDadosEmTempoReal();
+}
+
+function ordenarColunaPorData(coluna, btnElement, event) {
+    if (event) event.stopPropagation();
+
+    const ordemAtual = btnElement.getAttribute('data-ordem') || 'asc';
+    const novaOrdem = ordemAtual === 'asc' ? 'desc' : 'asc';
+
+    btnElement.setAttribute('data-ordem', novaOrdem);
+    btnElement.innerHTML = novaOrdem === 'asc' ? 'Z - A' : 'A - Z';
+
+    // Conversor de data BR (DD/MM/YYYY HH:MM) para número (timestamp)
+    const parseDataBR = (dataStr) => {
+        if (!dataStr || dataStr === 'Sem data') return Infinity;
+        const partes = dataStr.split(/[\s/:]+/);
+        if (partes.length >= 3) {
+            return new Date(partes[2], partes[1] - 1, partes[0], partes[3] || 0, partes[4] || 0).getTime();
+        }
+        return Infinity;
+    };
+
+    // Ordena o array global na memória
+    dadosGlobaisProcessados[coluna].sort((a, b) => {
+        const tempoA = parseDataBR(a.dataHora);
+        const tempoB = parseDataBR(b.dataHora);
+        return novaOrdem === 'desc' ? tempoB - tempoA : tempoA - tempoB; // Inverte dependendo do clique
+    });
+
+    // Manda desenhar a tela novamente com os dados já organizados
+    renderizarPainelCompleto();
 }
