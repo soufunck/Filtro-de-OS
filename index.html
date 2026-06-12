@@ -69,7 +69,7 @@
                             <span id="current-mode-badge"></span>
                             <button id="btn-voltar-splash" class="btn-voltar" style="display: none;"
                                 onclick="voltarParaSplash()">
-                                Voltar ao menu inicial
+                                ← Voltar ao menu inicial
                             </button>
                         </div>
                     </div>
@@ -126,6 +126,7 @@
                     <button class="tab-btn" onclick="mudarVisaoAba('sucesso', this)">Sucesso</button>
                     <button class="tab-btn" onclick="mudarVisaoAba('renegociar', this)">Negociação</button>
                     <button class="tab-btn" onclick="mudarVisaoAba('agendada', this)">Agendada</button>
+                    <button class="tab-btn" onclick="mudarVisaoAba('perdidos', this)">Perdemos</button>
                     <button class="tab-btn" onclick="mudarVisaoAba('outros', this)">Outros</button>
                     <button class="tab-btn auditoria-btn" id="tab-auditoria"
                         onclick="mudarVisaoAba('auditoria', this)">Erros</button>
@@ -135,7 +136,7 @@
             <div class="kpi-single-wrapper" id="tour-kpi">
                 <div class="panel-mod-header">
                     <h4 id="kpi-total-title">Total de Registros</h4>
-                    <button data-tooltip="Exportar planilha com os dados filtrados" class="btn-simples"
+                    <button data-tooltip="Exportar planilha com todas as colunas" class="btn-simples"
                         id="btn-export-completo" onclick="exportarFiltroCompleto()">
                         Exportar planilha
                     </button>
@@ -154,7 +155,10 @@
                 <div class="dashboard-grid" id="main-dashboard-grid">
                     <div class="grid-card" data-col="urgente" id="tour-colunas">
                         <div class="card-header urgente" draggable="true">
-                            <span>Em aberto</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Em aberto</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('urgente', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('urgente')">Selecionar todos</button>
@@ -202,7 +206,10 @@
 
                     <div class="grid-card" data-col="sucesso">
                         <div class="card-header sucesso" draggable="true">
-                            <span>Sucesso</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Sucesso</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('sucesso', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('sucesso')">Selecionar todos</button>
@@ -224,7 +231,10 @@
 
                     <div class="grid-card" data-col="renegociar">
                         <div class="card-header renegociar" draggable="true">
-                            <span>Negociação</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Negociação</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('renegociar', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('renegociar')">Selecionar todos</button>
@@ -246,7 +256,10 @@
 
                     <div class="grid-card" data-col="agendada">
                         <div class="card-header agendada" draggable="true">
-                            <span>Agendada</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Agendamento</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('agendada', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('agendada')">Selecionar todos</button>
@@ -266,9 +279,37 @@
                         </div>
                     </div>
 
+                    <div class="grid-card" data-col="perdidos">
+                        <div class="card-header perdidos" draggable="true">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Perdemos</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('perdidos', this, event)">Z - A</button>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <button class="btn-export" style="background: rgba(255,255,255,0.15);"
+                                    onclick="selecionarTodosDaColuna('perdidos')">Selecionar todos</button>
+                                <span class="count-pill" data-tooltip="Total de itens" id="count-perdidos">0</span>
+                                <button class="btn-export" data-tooltip="Baixe o relatório"
+                                    onclick="exportarColunaParaExcel('Perdemos', 'perdidos')">Exportar</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <tbody id="table-perdidos">
+                                    <tr>
+                                        <td colspan="3" class="no-data">Nenhum dado.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <div class="grid-card" data-col="outros">
                         <div class="card-header outros" draggable="true">
-                            <span>Outras</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Outros assuntos</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('outros', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('outros')">Selecionar todos</button>
@@ -290,7 +331,10 @@
 
                     <div class="grid-card" data-col="auditoria">
                         <div class="card-header auditoria" draggable="true">
-                            <span>Erros</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span>Erros</span>
+                                <button class="btn-sort-date" data-ordem="asc" onclick="ordenarColunaPorData('auditoria', this, event)">Z - A</button>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <button class="btn-export" style="background: rgba(255,255,255,0.15);"
                                     onclick="selecionarTodosDaColuna('auditoria')">Selecionar todos</button>
@@ -338,8 +382,6 @@
             <h3 class="modal-title" id="modal-client-name"></h3>
             <p class="modal-subtitle" id="modal-client-id"></p>
             <div style="border-top: 1px solid var(--border-light); padding-top: 16px;">
-                <span
-                    style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Histórico:</span>
                 <div class="timeline" id="modal-timeline-content"></div>
             </div>
         </div>
@@ -349,7 +391,7 @@
         <div class="bulk-bar-container">
             <div class="bulk-info">
                 <span class="bulk-counter" id="bulk-select-count">0</span>
-                <span class="bulk-text">itens selecionados</span>
+                <span class="bulk-text">iten(s) selecionado(s)</span>
             </div>
             <div class="bulk-actions-group">
                 <button class="btn-bulk btn-bulk-verify" onclick="executarAcaoEmLote('verificar')">
@@ -362,12 +404,13 @@
                 <div class="bulk-dropdown-wrapper">
                     <button class="btn-bulk btn-bulk-move" onclick="toggleMoverMenu(event)">Mover para</button>
                     <div class="bulk-dropdown-menu" id="bulk-move-menu">
-                        <button onclick="executarAcaoEmLote('mover', 'urgente')">🚨 Urgente</button>
-                        <button onclick="executarAcaoEmLote('mover', 'sucesso')">✅ Sucesso</button>
-                        <button onclick="executarAcaoEmLote('mover', 'renegociar')">🤝 Renegociar</button>
-                        <button onclick="executarAcaoEmLote('mover', 'agendada')">📅 Agendada</button>
+                        <button onclick="executarAcaoEmLote('mover', 'urgente')">Urgente</button>
+                        <button onclick="executarAcaoEmLote('mover', 'sucesso')">Sucesso</button>
+                        <button onclick="executarAcaoEmLote('mover', 'renegociar')">Renegociar</button>
+                        <button onclick="executarAcaoEmLote('mover', 'agendada')">Agendada</button>
                     </div>
                 </div>
+
                 <button class="btn-bulk btn-bulk-delete" onclick="executarAcaoEmLote('excluir')">
                     Excluir
                 </button>
@@ -410,6 +453,10 @@
                         <label class="custom-check-container">
                             <input type="checkbox" id="exp-status-auditoria" checked>
                             <span class="checkmark"></span> Erros Encontrados (Auditoria)
+                        </label>
+                        <label class="custom-check-container">
+                            <input type="checkbox" id="exp-status-perdidos" checked>
+                            <span class="checkmark"></span> Equipamentos Perdidos
                         </label>
                     </div>
                 </div>
